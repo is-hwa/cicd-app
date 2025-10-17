@@ -1,14 +1,22 @@
 name: CI-Build-Push-And-Bump
+
 on:
   push:
     branches: [ "main" ]
   pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: cicd-app
+  cancel-in-progress: true
 
 jobs:
   build_test_push_bump:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      PYTHONPATH: ${{ github.workspace }}   # ← 여기 추가 (리포 루트를 파이썬 모듈 경로로)
     steps:
       - uses: actions/checkout@v4
 
@@ -19,7 +27,8 @@ jobs:
       - name: Install deps & test
         run: |
           pip install -r requirements.txt pytest
-          pytest -q
+          python -c "import sys,os; print('CWD=',os.getcwd()); print('PYTHONPATH=',os.environ.get('PYTHONPATH')); print('sys.path[0]=',sys.path[0])"
+          python -m pytest -q
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
@@ -30,7 +39,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build & Push
+      - name: Build & Push image
         uses: docker/build-push-action@v6
         with:
           push: true
@@ -44,6 +53,7 @@ jobs:
           MANIFESTS_REPO: ${{ secrets.MANIFESTS_REPO }}
           SHA: ${{ github.sha }}
         run: |
+          set -e
           git clone https://x-access-token:${MANIFESTS_PAT}@github.com/${MANIFESTS_REPO}.git manifests
           cd manifests/overlays/dev
           sed -i.bak "s#^\(\s*newTag:\s*\).*#\1${SHA}#g" kustomization.yaml
